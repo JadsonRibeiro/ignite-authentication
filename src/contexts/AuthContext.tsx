@@ -10,6 +10,7 @@ type SignInCredentials = {
 
 type AuthContextData = {
     signIn(credentials: SignInCredentials): Promise<void>;
+    signOut(): void;
     isAuthenticated: boolean;
     user: User | undefined;
 }
@@ -20,6 +21,8 @@ type User = {
     roles: string[];
 }
 
+let authChannel: BroadcastChannel;
+
 const AuthContext = createContext({} as AuthContextData);
 
 type AuthProviderProsp = {
@@ -27,15 +30,36 @@ type AuthProviderProsp = {
 }
 
 export function signOut() {
+    console.log('Sign Out called');
+
     destroyCookie(undefined, 'authrkst.token')
     destroyCookie(undefined, 'authrkst.refreshToken');
 
     Router.push('/');
+    
+    authChannel.postMessage('signOut');
 }
 
 export function AuthProvider({ children }: AuthProviderProsp) {
     const [user, setUser] = useState<User>();
     const isAuthenticated = !!user;
+
+    useEffect(() => {
+        authChannel = new BroadcastChannel('auth');
+
+        authChannel.onmessage = message => {
+            console.log('Message', message);
+            switch (message.data) {
+                case 'signOut':
+                    Router.push('/');
+                    break;
+                case 'signIn':
+                    Router.push('/dashboard');
+                default:
+                    break;
+            }
+        };
+    }, []);
 
     useEffect(() => {
         const { 'authrkst.token': token } = parseCookies();
@@ -46,11 +70,12 @@ export function AuthProvider({ children }: AuthProviderProsp) {
                     const { email, permissions, roles } = response.data;
 
                     setUser({ email, permissions, roles });
-                }).catch(() => {
+                }).catch((e) => {
                     // Se algum error for disparado aqui, será algo relacionado a qualquer coisa
                     // que não seja erro de token expirado, pois será tratado em api.ts
                     // Por isso, é necessário deslogar o usuário
 
+                    console.log("Error on /me request", e);
                     signOut();
                 });
         }
@@ -85,13 +110,15 @@ export function AuthProvider({ children }: AuthProviderProsp) {
             api.defaults.headers['Authorization'] = `Bearer ${token}`;
 
             Router.push('/dashboard');
+            
+            authChannel.postMessage('signIn');
         } catch(e) {
             console.log('Sign In error', e);
         }
     }
 
     return (
-        <AuthContext.Provider value={{ isAuthenticated, signIn, user }}>
+        <AuthContext.Provider value={{ isAuthenticated, signIn, signOut, user }}>
             {children}
         </AuthContext.Provider>
     )
